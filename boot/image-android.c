@@ -178,6 +178,51 @@ static void android_boot_image_v0_v1_v2_parse_hdr(const struct andr_boot_img_hdr
 	data->boot_img_total_size = end - (ulong)hdr;
 }
 
+bool android_image_get_bootimg_size(const void *hdr, u32 *boot_img_size)
+{
+	struct andr_image_data data;
+
+	if (!hdr || !boot_img_size) {
+		printf("hdr or boot_img_size can't be NULL\n");
+		return false;
+	}
+
+	if (!is_android_boot_image_header(hdr)) {
+		printf("Incorrect boot image header\n");
+		return false;
+	}
+
+	if (((struct andr_boot_img_hdr_v0 *)hdr)->header_version <= 2)
+		android_boot_image_v0_v1_v2_parse_hdr(hdr, &data);
+	else
+		android_boot_image_v3_v4_parse_hdr(hdr, &data);
+
+	*boot_img_size = data.boot_img_total_size;
+
+	return true;
+}
+
+bool android_image_get_vendor_bootimg_size(const void *hdr, u32 *vendor_boot_img_size)
+{
+	struct andr_image_data data;
+
+	if (!hdr || !vendor_boot_img_size) {
+		printf("hdr or vendor_boot_img_size can't be NULL\n");
+		return false;
+	}
+
+	if (!is_android_vendor_boot_image_header(hdr)) {
+		printf("Incorrect vendor boot image header\n");
+		return false;
+	}
+
+	android_vendor_boot_image_v3_v4_parse_hdr(hdr, &data);
+
+	*vendor_boot_img_size = data.vendor_boot_img_total_size;
+
+	return true;
+}
+
 bool android_image_get_data(const void *boot_hdr, const void *vendor_boot_hdr,
 			    struct andr_image_data *data)
 {
@@ -287,41 +332,45 @@ int android_image_get_kernel(const void *hdr,
 	       kernel_addr, DIV_ROUND_UP(img_data.kernel_size, 1024));
 
 	int len = 0;
-	if (*img_data.kcmdline) {
-		printf("Kernel command line: %s\n", img_data.kcmdline);
-		len += strlen(img_data.kcmdline);
-	}
-
-	if (img_data.kcmdline_extra) {
-		printf("Kernel extra command line: %s\n", img_data.kcmdline_extra);
-		len += strlen(img_data.kcmdline_extra);
-	}
-
 	char *bootargs = env_get("bootargs");
+
 	if (bootargs)
 		len += strlen(bootargs);
 
-	char *newbootargs = malloc(len + 2);
+	if (img_data.kcmdline && *img_data.kcmdline) {
+		printf("Kernel command line: %s\n", img_data.kcmdline);
+		len += strlen(img_data.kcmdline) + (len ? 1 : 0); /* +1 for extra space */
+	}
+
+	if (img_data.kcmdline_extra && *img_data.kcmdline_extra) {
+		printf("Kernel extra command line: %s\n", img_data.kcmdline_extra);
+		len += strlen(img_data.kcmdline_extra) + (len ? 1 : 0); /* +1 for extra space */
+	}
+
+	char *newbootargs = malloc(len + 1); /* +1 for the '\0' */
 	if (!newbootargs) {
 		puts("Error: malloc in android_image_get_kernel failed!\n");
 		return -ENOMEM;
 	}
-	*newbootargs = '\0';
+	*newbootargs = '\0'; /* set to Null in case no components below are present */
 
-	if (bootargs) {
+	if (bootargs)
 		strcpy(newbootargs, bootargs);
-		strcat(newbootargs, " ");
+
+	if (img_data.kcmdline && *img_data.kcmdline) {
+		if (*newbootargs) /* If there is something in newbootargs, a space is needed */
+			strcat(newbootargs, " ");
+		strcat(newbootargs, img_data.kcmdline);
 	}
 
-	if (*img_data.kcmdline)
-		strcat(newbootargs, img_data.kcmdline);
-
-	if (img_data.kcmdline_extra) {
-		strcat(newbootargs, " ");
+	if (img_data.kcmdline_extra && *img_data.kcmdline_extra) {
+		if (*newbootargs) /* If there is something in newbootargs, a space is needed */
+			strcat(newbootargs, " ");
 		strcat(newbootargs, img_data.kcmdline_extra);
 	}
 
 	env_set("bootargs", newbootargs);
+	free(newbootargs);
 
 	if (os_data) {
 		if (image_get_magic(ihdr) == IH_MAGIC) {
@@ -647,7 +696,10 @@ bool android_image_get_dtb_by_index(ulong hdr_addr, ulong vendor_boot_img,
 	ulong dtb_addr;		/* address of DTB blob with specified index  */
 	u32 i;			/* index iterator */
 
-	android_image_get_dtb_img_addr(hdr_addr, vendor_boot_img, &dtb_img_addr);
+	if (!android_image_get_dtb_img_addr(hdr_addr, vendor_boot_img,
+					    &dtb_img_addr))
+		return false;
+
 	/* Check if DTB area of boot image is in DTBO format */
 	if (android_dt_check_header(dtb_img_addr)) {
 		return android_dt_get_fdt_by_index(dtb_img_addr, index, addr,

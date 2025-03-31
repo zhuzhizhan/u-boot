@@ -750,7 +750,7 @@ static int mmc_send_op_cond(struct mmc *mmc)
 {
 	int err, i;
 	int timeout = 1000;
-	uint start;
+	ulong start;
 
 	/* Some cards seem to need this */
 	mmc_go_idle(mmc);
@@ -844,7 +844,8 @@ int mmc_send_ext_csd(struct mmc *mmc, u8 *ext_csd)
 static int __mmc_switch(struct mmc *mmc, u8 set, u8 index, u8 value,
 			bool send_status)
 {
-	unsigned int status, start;
+	ulong start;
+	unsigned int status;
 	struct mmc_cmd cmd;
 	int timeout_ms = DEFAULT_CMD6_TIMEOUT_MS;
 	bool is_part_switch = (set == EXT_CSD_CMD_SET_NORMAL) &&
@@ -2375,7 +2376,7 @@ static int mmc_startup_v4(struct mmc *mmc)
 				| ext_csd[EXT_CSD_SEC_CNT + 2] << 16
 				| ext_csd[EXT_CSD_SEC_CNT + 3] << 24;
 		capacity *= MMC_MAX_BLOCK_LEN;
-		if ((capacity >> 20) > 2 * 1024)
+		if (mmc->high_capacity)
 			mmc->capacity_user = capacity;
 	}
 

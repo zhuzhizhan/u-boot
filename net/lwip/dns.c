@@ -56,7 +56,7 @@ static int dns_loop(struct udevice *udev, const char *name, const char *var)
 
 	netif = net_lwip_new_netif(udev);
 	if (!netif)
-		return -1;
+		return CMD_RET_FAILURE;
 
 	dns_init();
 
@@ -121,7 +121,7 @@ int do_dns(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[])
 	if (argc == 3)
 		var = argv[2];
 
-	eth_set_current();
+	net_lwip_set_current();
 
 	return dns_loop(eth_get_dev(), name, var);
 }

@@ -68,6 +68,19 @@ struct msg_get_clock_rate {
 	u32 end_tag;
 };
 
+struct efi_fw_image fw_images[] = {
+	{
+		.fw_name = u"RPI_UBOOT",
+		.image_index = 1,
+	},
+};
+
+struct efi_capsule_update_info update_info = {
+	.dfu_string = "mmc 0=u-boot.bin fat 0 1",
+	.num_images = ARRAY_SIZE(fw_images),
+	.images = fw_images,
+};
+
 #ifdef CONFIG_ARM64
 #define DTB_DIR "broadcom/"
 #else
@@ -178,6 +191,21 @@ static const struct rpi_model rpi_models_new_scheme[] = {
 	[0x17] = {
 		"5 Model B",
 		DTB_DIR "bcm2712-rpi-5-b.dtb",
+		true,
+	},
+	[0x18] = {
+		"Compute Module 5",
+		DTB_DIR "bcm2712-rpi-cm5-cm5io.dtb",
+		true,
+	},
+	[0x19] = {
+		"500",
+		DTB_DIR "bcm2712-rpi-500.dtb",
+		true,
+	},
+	[0x1A] = {
+		"Compute Module 5 Lite",
+		DTB_DIR "bcm2712-rpi-cm5l-cm5io.dtb",
 		true,
 	},
 };
@@ -508,15 +536,14 @@ int board_init(void)
 /*
  * If the firmware passed a device tree use it for U-Boot.
  */
-void *board_fdt_blob_setup(int *err)
+int board_fdt_blob_setup(void **fdtp)
 {
-	*err = 0;
-	if (fdt_magic(fw_dtb_pointer) != FDT_MAGIC) {
-		*err = -ENXIO;
-		return NULL;
-	}
+	if (fdt_magic(fw_dtb_pointer) != FDT_MAGIC)
+		return -ENXIO;
 
-	return (void *)fw_dtb_pointer;
+	*fdtp = (void *)fw_dtb_pointer;
+
+	return 0;
 }
 
 int copy_property(void *dst, void *src, char *path, char *property)
@@ -545,11 +572,14 @@ void  update_fdt_from_fw(void *fdt, void *fw_fdt)
 	if (fdt == fw_fdt)
 		return;
 
-	/* The firmware provides a more precie model; so copy that */
+	/* The firmware provides a more precise model; so copy that */
 	copy_property(fdt, fw_fdt, "/", "model");
 
 	/* memory reserve as suggested by the firmware */
 	copy_property(fdt, fw_fdt, "/", "memreserve");
+
+	/* copy the CMA memory setting from the firmware DT to linux */
+	copy_property(fdt, fw_fdt, "/reserved-memory/linux,cma", "size");
 
 	/* Adjust dma-ranges for the SD card and PCI bus as they can depend on
 	 * the SoC revision
@@ -564,8 +594,14 @@ void  update_fdt_from_fw(void *fdt, void *fw_fdt)
 	/* kernel address randomisation seed as provided by the firmware */
 	copy_property(fdt, fw_fdt, "/chosen", "kaslr-seed");
 
+	/* warnings from the firmware (if any) */
+	copy_property(fdt, fw_fdt, "/chosen", "user-warnings");
+
 	/* address of the PHY device as provided by the firmware  */
 	copy_property(fdt, fw_fdt, "ethernet0/mdio@e14/ethernet-phy@1", "reg");
+
+	/* Bluetooth device address as provided by the firmware */
+	copy_property(fdt, fw_fdt, "/soc/serial@7e201000/bluetooth", "local-bd-address");
 }
 
 int ft_board_setup(void *blob, struct bd_info *bd)
@@ -574,11 +610,13 @@ int ft_board_setup(void *blob, struct bd_info *bd)
 
 	update_fdt_from_fw(blob, (void *)fw_dtb_pointer);
 
-	node = fdt_node_offset_by_compatible(blob, -1, "simple-framebuffer");
-	if (node < 0)
-		fdt_simplefb_add_node(blob);
-	else
-		fdt_simplefb_enable_and_mem_rsv(blob);
+	if (CONFIG_IS_ENABLED(FDT_SIMPLEFB)) {
+		node = fdt_node_offset_by_compatible(blob, -1, "simple-framebuffer");
+		if (node < 0)
+			fdt_simplefb_add_node(blob);
+		else
+			fdt_simplefb_enable_and_mem_rsv(blob);
+	}
 
 #ifdef CONFIG_EFI_LOADER
 	/* Reserve the spin table */
